@@ -974,10 +974,6 @@ public:
 
   enum_state state;
 
-protected:
-  friend class sp_head;
-  bool is_stored_procedure;
-
 public:
   /* We build without RTTI, so dynamic_cast can't be used. */
   enum Type
@@ -986,8 +982,7 @@ public:
   };
 
   Query_arena(MEM_ROOT *mem_root_arg, enum enum_state state_arg) :
-    free_list(0), mem_root(mem_root_arg), state(state_arg),
-    is_stored_procedure(state_arg == STMT_INITIALIZED_FOR_SP ? true : false)
+    free_list(0), mem_root(mem_root_arg), state(state_arg)
   { INIT_ARENA_DBUG_INFO; }
   /*
     This constructor is used only when Query_arena is created as
@@ -4936,6 +4931,7 @@ public:
   */
   virtual int send_data(List<Item> &items)=0;
   virtual ~select_result_sink() {};
+  void reset(THD *thd_arg) { thd= thd_arg; }
 };
 
 
@@ -5013,6 +5009,11 @@ public:
   */
   virtual void cleanup();
   void set_thd(THD *thd_arg) { thd= thd_arg; }
+  void reset(THD *thd_arg)
+  {
+    select_result_sink::reset(thd_arg);
+    unit= NULL;
+  }
 #ifdef EMBEDDED_LIBRARY
   virtual void begin_dataset() {}
 #else
@@ -5109,8 +5110,111 @@ public:
     elsewhere. (this is used by ANALYZE $stmt feature).
   */
   void disable_my_ok_calls() { suppress_my_ok= true; }
+  void reset(THD *thd_arg)
+  {
+    select_result::reset(thd_arg);
+    suppress_my_ok= false;
+  }
 protected:
   bool suppress_my_ok;
+};
+
+
+class sp_cursor_statistics
+{
+protected:
+  ulonglong m_fetch_count; // Number of FETCH commands since last OPEN
+  ulonglong m_row_count;   // Number of successful FETCH since last OPEN
+  bool m_found;            // If last FETCH fetched a row
+public:
+  sp_cursor_statistics()
+   :m_fetch_count(0),
+    m_row_count(0),
+    m_found(false)
+  { }
+  bool found() const
+  { return m_found; }
+
+  ulonglong row_count() const
+  { return m_row_count; }
+
+  ulonglong fetch_count() const
+  { return m_fetch_count; }
+  void reset() { *this= sp_cursor_statistics(); }
+};
+
+
+/* A mediator between stored procedures and server side cursors */
+class sp_lex_keeper;
+class sp_cursor: public sp_cursor_statistics
+{
+private:
+  /// An interceptor of cursor result set used to implement
+  /// FETCH <cname> INTO <varlist>.
+  class Select_fetch_into_spvars: public select_result_interceptor
+  {
+    List<sp_variable> *spvar_list;
+    uint field_count;
+    bool send_data_to_variable_list(List<sp_variable> &vars, List<Item> &items);
+  public:
+    Select_fetch_into_spvars(THD *thd_arg): select_result_interceptor(thd_arg) {}
+    void reset(THD *thd_arg)
+    {
+      select_result_interceptor::reset(thd_arg);
+      spvar_list= NULL;
+      field_count= 0;
+    }
+    uint get_field_count() { return field_count; }
+    void set_spvar_list(List<sp_variable> *vars) { spvar_list= vars; }
+
+    virtual bool send_eof() { return FALSE; }
+    virtual int send_data(List<Item> &items);
+    virtual int prepare(List<Item> &list, SELECT_LEX_UNIT *u);
+};
+
+public:
+  sp_cursor()
+   :result(NULL),
+    m_lex_keeper(NULL),
+    server_side_cursor(NULL)
+  { }
+  sp_cursor(THD *thd_arg, sp_lex_keeper *lex_keeper)
+   :result(thd_arg),
+    m_lex_keeper(lex_keeper),
+    server_side_cursor(NULL)
+  {}
+
+  virtual ~sp_cursor()
+  { destroy(); }
+
+  sp_lex_keeper *get_lex_keeper() { return m_lex_keeper; }
+
+  int open(THD *thd);
+
+  int open_view_structure_only(THD *thd);
+
+  int close(THD *thd);
+
+  my_bool is_open()
+  { return MY_TEST(server_side_cursor); }
+
+  int fetch(THD *, List<sp_variable> *vars, bool error_on_no_data);
+
+  bool export_structure(THD *thd, Row_definition_list *list);
+
+  void reset(THD *thd_arg, sp_lex_keeper *lex_keeper)
+  {
+    sp_cursor_statistics::reset();
+    result.reset(thd_arg);
+    m_lex_keeper= lex_keeper;
+    server_side_cursor= NULL;
+  }
+
+private:
+  Select_fetch_into_spvars result;
+  sp_lex_keeper *m_lex_keeper;
+  Server_side_cursor *server_side_cursor;
+  void destroy();
 };
 
 
