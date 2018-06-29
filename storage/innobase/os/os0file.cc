@@ -4990,12 +4990,12 @@ os_file_write_func(
 			<< offset << ", " << n
 			<< " bytes should have been written,"
 			" only " << n_bytes << " were written."
-			" Operating system error number " << errno << "."
+			" Operating system error number " << IF_WIN(GetLastError(),errno) << "."
 			" Check that your OS and file system"
 			" support files of this size."
 			" Check also that the disk is not full"
 			" or a disk quota exceeded.";
-
+#ifndef _WIN32
 		if (strerror(errno) != NULL) {
 
 			ib::error()
@@ -5004,7 +5004,7 @@ os_file_write_func(
 		}
 
 		ib::info() << OPERATING_SYSTEM_ERROR_MSG;
-
+#endif
 		os_has_said_disk_full = true;
 	}
 

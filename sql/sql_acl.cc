@@ -7544,7 +7544,7 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
                          INSERT_ACL : SELECT_ACL);
     }
 
-    if (tl->with ||
+    if (tl->with || !tl->db.str ||
         (tl->select_lex &&
          (tl->with= tl->select_lex->find_table_def_in_with_clauses(tl))))
       continue;

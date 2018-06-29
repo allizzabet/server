@@ -4194,8 +4194,8 @@ public:
         return TRUE;
       }
       /* This will allow to throw an error later for non-CTE references */
-      to->str= (char *) no_db;
-      to->length= strlen(no_db);
+      to->str= NULL;
+      to->length= 0;
     }
     else
     {
@@ -6376,8 +6376,6 @@ inline int handler::ha_ft_read(uchar *buf)
 inline int handler::ha_rnd_pos_by_record(uchar *buf)
 {
   int error= rnd_pos_by_record(buf);
-  if (!error)
-    update_rows_read();
   table->status=error ? STATUS_NOT_FOUND: 0;
   return error;
 }
